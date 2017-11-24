@@ -643,39 +643,44 @@ public final class QueryClientConnection<PreparedStatementType: PreparedStatemen
 		let queue = DispatchQueue.global(qos: .default)
 
 		// Create the run loop work item and dispatch to the default priority global queue...
-		queue.async { [unowned self] in
-			var shouldKeepRunning = true
-			do {
-				switch self.state {
-				case .new:
-					if let len = self.readInt32(), let msg = self.readInt32() {
-						if len == 8 && msg == 80877103 {
-							// No SSL, thank you
-							try self.socket.write(from: "N")
-						}
-						else if len > UInt32(8) {
-							// Read client version number
-							self.majorVersion = UInt16(msg >> 16)
-							self.minorVersion = UInt16(msg & 0xFFFF)
+		queue.async { [weak self] in
+			if let s = self {
+				var shouldKeepRunning = true
+				do {
+					switch s.state {
+					case .new:
+						if let len = s.readInt32(), let msg = s.readInt32() {
+							if len == 8 && msg == 80877103 {
+								// No SSL, thank you
+								try s.socket.write(from: "N")
+							}
+							else if len > UInt32(8) {
+								// Read client version number
+								s.majorVersion = UInt16(msg >> 16)
+								s.minorVersion = UInt16(msg & 0xFFFF)
 
-							// Read parameters
-							if let p = try self.readParameters(length: len - UInt32(8)) {
-								self.username = p["user"]
+								// Read parameters
+								if let p = try s.readParameters(length: len - UInt32(8)) {
+									s.username = p["user"]
 
-								// Send authentication request
-								let buf = Data(bytes: [UInt8(Character("R").codePoint), 0, 0, 0, 8, 0, 0, 0, 3])
-								try self.socket.write(from: buf)
+									// Send authentication request
+									let buf = Data(bytes: [UInt8(Character("R").codePoint), 0, 0, 0, 8, 0, 0, 0, 3])
+									try s.socket.write(from: buf)
 
-								// Read authentication
-								if let pw = try self.readAuthentication() {
-									self.password = pw
+									// Read authentication
+									if let pw = try s.readAuthentication() {
+										s.password = pw
 
-									// Send authentication success
-									let buf = Data(bytes: [UInt8(Character("R").codePoint), 0, 0, 0, 8, 0, 0, 0, 0])
-									try self.socket.write(from: buf)
+										// Send authentication success
+										let buf = Data(bytes: [UInt8(Character("R").codePoint), 0, 0, 0, 8, 0, 0, 0, 0])
+										try s.socket.write(from: buf)
 
-									self.state = .ready
-									try self.sendReadyForQuery()
+										s.state = .ready
+										try s.sendReadyForQuery()
+									}
+									else {
+										shouldKeepRunning = false
+									}
 								}
 								else {
 									shouldKeepRunning = false
@@ -685,30 +690,27 @@ public final class QueryClientConnection<PreparedStatementType: PreparedStatemen
 								shouldKeepRunning = false
 							}
 						}
-						else {
+
+					case .ready, .querying:
+						if try !s.readPacket() {
 							shouldKeepRunning = false
 						}
-					}
 
-				case .ready, .querying:
-					if try !self.readPacket() {
-						shouldKeepRunning = false
+					case .closed:
+						return
 					}
-
-				case .closed:
-					return
 				}
-			}
-			catch {
-				try? self.send(error: error.localizedDescription)
-				shouldKeepRunning = false
-			}
+				catch {
+					try? s.send(error: error.localizedDescription)
+					shouldKeepRunning = false
+				}
 
-			if shouldKeepRunning {
-				self.run()
-			}
-			else {
-				self.close()
+				if shouldKeepRunning {
+					s.run()
+				}
+				else {
+					s.close()
+				}
 			}
 		}
 	}
