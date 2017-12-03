@@ -11,6 +11,7 @@ public final class QueryClientConnection<PreparedStatementType: PreparedStatemen
 		case closed
 	}
 
+	public private(set) var database: String? = nil
 	public private(set) var username: String? = nil
 	public private(set) var password: String? = nil
 	public private(set) var majorVersion: UInt16? = nil
@@ -662,6 +663,7 @@ public final class QueryClientConnection<PreparedStatementType: PreparedStatemen
 								// Read parameters
 								if let p = try s.readParameters(length: len - UInt32(8)) {
 									s.username = p["user"]
+									s.database = p["database"]
 
 									// Send authentication request
 									let buf = Data(bytes: [UInt8(Character("R").codePoint), 0, 0, 0, 8, 0, 0, 0, 3])
